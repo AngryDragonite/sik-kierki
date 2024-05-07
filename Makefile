@@ -9,9 +9,9 @@ TARGET2 = kierki-serwer
 all: $(TARGET1) $(TARGET2)
 
 $(TARGET1): $(TARGET1).o common.o
-	g++ $(CXXFLAGS) kierki-klient.o common.o -o kierki-klient   -lboost_program_options
+	g++ $(CXXFLAGS) kierki-klient.o common.o -o kierki-klient
 $(TARGET2): $(TARGET2).o common.o
-	g++ $(CXXFLAGS) kierki-serwer.o common.o -o kierki-serwer   -lboost_program_options
+	g++ $(CXXFLAGS) kierki-serwer.o common.o -o kierki-serwer
 
 common.o: common.cpp
 	g++ $(CXXFLAGS) -c -O2 common.cpp

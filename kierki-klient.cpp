@@ -5,6 +5,7 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <string.h>
 
 #include "common.h"
 
@@ -16,6 +17,7 @@ using std::cin;
 
 void get_input(int argc, char* argv[], struct sockaddr_in &server_address, bool &ipv4, bool &ipv6, char &place, bool &automatic) {
     int c;
+    place = 'X';
     string host;
     uint16_t port;
 
@@ -48,7 +50,6 @@ void get_input(int argc, char* argv[], struct sockaddr_in &server_address, bool 
             case 'a':
                 automatic = true;
                 break;
-
         }
     }
 
@@ -76,4 +77,42 @@ int main(int argc, char* argv[]) {
     
     get_input(argc, argv, server_address, ipv4, ipv6, place, automatic);
 
+    // Create a socket.
+    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd < 0) {
+        syserr("cannot create a socket");
+    }
+
+    // Connect to the server.
+    if (connect(socket_fd, (struct sockaddr *) &server_address,
+                (socklen_t) sizeof(server_address)) < 0) {
+        syserr("cannot connect to the server");
+    }
+
+    cout << "connected\n";
+
+    string input;
+
+    char msg[6];
+    msg[0] = 'I';
+    msg[1] = 'A';
+    msg[2] = 'M';
+    msg[3] = place;
+    msg[4] = '\r';
+    msg[5] = '\n';
+
+    cout << msg;
+
+    writen(socket_fd, &msg, 6);
+
+
+    while (cin >> input) {
+        char buf[12];
+        strncpy(buf, input.c_str(), 12);
+        buf[input.size()] = '\r';
+        buf[input.size()+1] = '\n';
+        
+        writen(socket_fd, &buf, 12);
+        cout << "sent " << buf << endl;
+    }
 }

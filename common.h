@@ -4,6 +4,12 @@
 #include <inttypes.h>
 #include <stddef.h>
 #include <sys/types.h>
+#include <poll.h>
+#include <vector>
+
+#define CLIENTS 5
+
+using std::string;
 
 // 1) Send uint16_t, int32_t etc., not int.
 //    The length of int is platform-dependent.
@@ -39,5 +45,22 @@ void fatal(const char* fmt, ...);
 void error(const char* fmt, ...);
 
 void print_cards(const std::vector<std::pair<std::string, std::string>>& cards);
+
+void install_signal_handler(int signal, void (*handler)(int), int flags);
+
+void set_timeout(int fd, unsigned time);
+
+int char_to_int(char c);
+
+char int_to_char(int i);
+
+void get_input(int argc, char *argv[], uint16_t &port, string &file, unsigned &time);
+
+char get_next_player(char c);
+
+string get_busy_sides(struct pollfd poll_descriptors[5]);
+
+string validate_trick(int lewa, char* answer, ssize_t len);
+
 
 #endif // COMMON_H

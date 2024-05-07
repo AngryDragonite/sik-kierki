@@ -15,9 +15,18 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <signal.h>
+#include <poll.h>
+#include <set>
+#include <iostream>
 
-#include "err.h"
+
 #include "common.h"
+
+using std::to_string;
+using std::set;
+using std::cout;
+using std::endl;
 
 uint16_t read_port(char const *string) {
     char *endptr;
@@ -173,4 +182,153 @@ void print_cards(const std::vector<std::pair<std::string, std::string>>& cards) 
         }
         std::cout << '\n';
     }
+}
+
+void install_signal_handler(int signal, void (*handler)(int), int flags) {
+    struct sigaction action;
+    sigset_t block_mask;
+
+    sigemptyset(&block_mask);
+    action.sa_handler = handler;
+    action.sa_mask = block_mask;
+    action.sa_flags = flags;
+
+    if (sigaction(signal, &action, NULL) < 0 ){
+        syserr("sigaction");
+    }
+}
+
+void set_timeout(int socket_fd, unsigned MAX_WAIT) {
+    //Ustawiamy wartość TIMEOUTu                                
+    struct timeval to = {.tv_sec = MAX_WAIT, .tv_usec = 0};
+    setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof to);
+    setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof to);
+}
+
+char int_to_char(int i) {
+    switch (i) {
+        case 1:
+            return 'N';
+        case 2:
+            return 'E';
+        case 3:
+            return 'S';
+        case 4:
+            return 'W';
+        default:
+            fatal("Invalid number");
+            return 1;
+
+    }
+}
+
+int char_to_int(char c) {
+
+    switch (c) {
+        case 'N':
+            return 1;
+            break;
+        case 'E':
+            return 2;
+            break;
+        case 'S':
+            return 3;
+            break;
+        case 'W':
+            return 4;
+            break;
+        default:
+            fatal("Invalid character");
+            return 1;
+    }
+}
+
+void get_input(int argc, char *argv[], uint16_t &port, string &file, unsigned &time) {
+    int c;
+    string time_str;
+    while ((c = getopt(argc, argv, "p:tf:")) != -1) {
+        switch (c) {
+            case 'f':
+                file = optarg;
+                break;
+            case 'p':
+                port = read_port(optarg);
+                break;
+            case 't':
+                time_str =  atoi(optarg);
+                break;
+        }
+    }
+
+    if (port == 0) {
+        fatal("Port number is required");
+    }
+    if (file.empty()) {
+        fatal("File name is required");
+    }
+    if (time_str.empty()) {
+        time = 5;
+    }
+}
+
+char get_next_player(char c) {
+    switch (c) {
+        case 'N':
+            return 'E';
+        case 'E':
+            return 'S';
+        case 'S':
+            return 'W';
+        case 'W':
+            return 'N';
+        default:
+            fatal("Invalid character");
+            return 1;
+    }
+}
+
+string get_busy_sides(struct pollfd poll_descriptors[5]) {
+    string busy_sides = "";
+    for (int i = 1; i <= 4; i++) {
+        if (poll_descriptors[i].fd != -1) {
+            busy_sides += int_to_char(i);
+        }
+    }
+    return busy_sides;
+}
+
+string validate_trick(int lewa, char* answer, ssize_t len) {
+    
+    string valid_prefix = "TRICK" + to_string(lewa);
+    string msg(answer);
+    if (msg.compare(0, valid_prefix.size(), valid_prefix) != 0) {
+        cout << "wrong prefix\n";
+        return "X";
+    }
+    msg = msg.substr(valid_prefix.size());
+
+    set<char> correct_vals = {'2','3','4','5','6','7','8','9','J','Q','K','A'};
+    set<char> correct_colors = {'C', 'D', 'H', 'S'};
+    set<char> correct_2nd = {'0', '1', '2', '3'};
+
+    string card;
+
+    if (msg.size() == 4) {
+        if (!correct_vals.contains(msg[0]) or !correct_colors.contains(msg[1]) or msg[2] != '\r' or msg[3] != '\n') {
+            cout << "wrong suffix\n";
+            return "X";
+        }
+        card = msg.substr(0,2);
+    } else if (msg.size() == 5) {
+        if (msg[0] != '1' or !correct_2nd.contains(msg[1] or !correct_colors.contains(msg[2]) or msg[3] != '\r' or msg[4] != '\n')) {
+            cout << "wrong suffix\n";
+            return "X";
+        }
+        card = msg.substr(0,3);
+    } else {
+        cout << "something else wrong\n";
+        return "X";
+    }
+
+    return card;
 }
