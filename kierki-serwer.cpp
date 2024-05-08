@@ -48,7 +48,7 @@ class Player {
 
         Player() {}
 
-        bool has_card(string card, int rozdanie) {
+        bool has_card(const string& card, int rozdanie) {
             for (string card_: cards[rozdanie]) {
                 if (card.compare(card_) == 0) {
                     return true;
@@ -66,7 +66,7 @@ class Player {
             return false;
         }
 
-        void remove_card(string card, int rozdanie) {   
+        void remove_card(const string& card, int rozdanie) {   
             for (int i = 0; i < 12; i++) {
                 if (cards[rozdanie][i] == card) {
                     cards[rozdanie][i] = "empty";
@@ -75,7 +75,7 @@ class Player {
             }
         }
 
-        void parse_cards(string input) {
+        void parse_cards(const string& input) {
             //Tutaj nie do końca musi być 2, bo może być 10, a wtedy będzie np 27.
             //Trzeba to poprawić.
             
@@ -126,6 +126,7 @@ class Server {
 
             string input;
             uint64_t i = 0;
+
             while ((getline(input_file, input))) {
                 uint8_t line_num = i % 5;
                 
@@ -163,12 +164,17 @@ class Server {
             cout << "socket\nbind\nlisten\n";
         }
 
-        void send_taken(string taken_msg) {
+        void send_taken(int lewa, const string& current_lewa_history, char winner) {
+            string taken_msg = "TAKEN" + to_string(lewa) + current_lewa_history + winner +"\r\n";
+            taken_lewa_history.push_back(taken_msg);
             cout << "sending TAKEN to every player\n";
         }
 
-        void adjust_temp_points(char player, string current_lewa_history, int rozdanie) {
+        void adjust_temp_points(char player, string& current_lewa_history, int rozdanie) {
+            
             cout << "adjusting temporary points\n";
+            current_lewa_history = "";
+
         }
 
         void adjust_total_points() {
@@ -254,7 +260,7 @@ int main(int argc, char* argv[]) {
             poll_descriptors[0].fd = -1;
         }
 
-        int poll_status = poll(poll_descriptors, CLIENTS, 3000);
+        int poll_status = poll(poll_descriptors, CLIENTS, 1000);
 
         if (poll_status == -1 ) {
             if (errno == EINTR) {
@@ -269,20 +275,13 @@ int main(int argc, char* argv[]) {
 
         else if (poll_status >= 0) {
             
-            //Tutaj jest taki błąd, że jak jest poll_status == 0 to nie przechodzi do następnego gracza
-            //tylko zatrzymuje się na tym graczu. Trzeba to poprawić.
-
             if (/*!finish && */(poll_descriptors[0].revents & POLLIN)) {
                 int client_fd = accept(poll_descriptors[0].fd,
                                        (struct sockaddr *) &client_address,
                                        &client_address_len);
-                bool wrong_client = false;
-
-
-                cout << "accepted connection from a new client\n";
-                
                 set_timeout(client_fd, time);
-
+                bool wrong_client = false;
+                cout << "accepted connection from a new client\n";
                 if (client_fd < 0) {
                     syserr("accept");
                 }
@@ -291,7 +290,6 @@ int main(int argc, char* argv[]) {
 
                 //readn what the client has to say
                 ssize_t read_len = readn(client_fd, &buffer, 6);
-                
                 if (read_len < 0) {
                     if (errno == EAGAIN) {
                         close(client_fd);
@@ -301,8 +299,6 @@ int main(int argc, char* argv[]) {
                         syserr("readn");
                     }
                 }
-
-
                 cout << buffer << endl;
 
                 char side = buffer[3];
@@ -346,6 +342,7 @@ int main(int argc, char* argv[]) {
                         writen(poll_descriptors[char_to_int(last_joined)].fd, deal_msg.c_str(), deal_msg.size());
                         //check for errors?
                         cout << "sent " << deal_msg << endl;
+
                         //send also every TAKEN history
                         for (string taken_lewa_msg : server.taken_lewa_history) {
                             writen(poll_descriptors[char_to_int(last_joined)].fd, taken_lewa_msg.c_str(), taken_lewa_msg.size());
@@ -354,14 +351,13 @@ int main(int argc, char* argv[]) {
                     }
                     
                     is_game_on = true;
-
                 }            
             } 
 
             //Handle connection requests
             if (is_game_on and !sent_deals and lewa == 0 and active_clients == 4) {
-                who_has_turn = server.who_starts[rozdanie];
                 //send DEAL to every client;
+                who_has_turn = server.who_starts[rozdanie];
                 string deal_msg_blueprint = "DEAL" + std::to_string(server.deal_ids[rozdanie]) + server.who_starts[rozdanie];
                 for (int i = 1; i <= 4; i++) {
                     string deal_msg = deal_msg_blueprint + server.players[int_to_char(i)].deal_cards[rozdanie] + "\r\n";
@@ -369,19 +365,18 @@ int main(int argc, char* argv[]) {
                     cout << "sent " << deal_msg << endl;
                     //check for errors?
                 }
-                sent_deals = true; //Will set false when rozdanie ends;
+                sent_deals = true;
                 cout << "sent deals\n";
             }
 
             cout << "who has turn: " << who_has_turn << endl;
-
             bool player_serviced = false;
 
             for (int i = 1; i < CLIENTS; i++) {
-                char temp_buff[5];
+                char temp_buff[1];
                 if (poll_descriptors[i].fd != -1 and (poll_descriptors[i].revents & (POLLIN | POLLERR))) {
                     
-                    ssize_t read_len = readn(poll_descriptors[i].fd, &temp_buff, 5);
+                    ssize_t read_len = readn(poll_descriptors[i].fd, &temp_buff, 1);
                     if (read_len < 0) {
                         error("??? Bro u had one job..");
                         //disconnect?
@@ -491,9 +486,10 @@ int main(int argc, char* argv[]) {
                 who_has_turn = winner;
                 lewa++;
                 string taken_msg = "TAKEN" + to_string(lewa) + current_lewa_history + winner +"\r\n";
-                server.taken_lewa_history.push_back(taken_msg);
-                current_lewa_history = "";
-                server.send_taken(taken_msg); //Todo implement
+                
+                
+                server.send_taken(lewa, current_lewa_history, winner);
+                
                 server.adjust_temp_points(winner, current_lewa_history, rozdanie); //Todo implement
             }
 
