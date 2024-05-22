@@ -1,11 +1,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <netdb.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -18,7 +18,8 @@
 #include <signal.h>
 #include <poll.h>
 #include <set>
-#include <iostream>
+#include <ctime>
+#include <iomanip>
 
 
 #include "common.h"
@@ -38,7 +39,18 @@ uint16_t read_port(char const *string) {
     return (uint16_t) port;
 }
 
-struct sockaddr_in get_server_address(char const *host, uint16_t port) {
+struct sockaddr_in get_server_address(char const *host, uint16_t port, int prottype = 0) {
+    
+    if (prottype == 0) {
+        prottype = AF_UNSPEC;
+    } else if (prottype == 4) {
+        prottype = AF_INET;
+    } else if (prottype == 6) {
+        prottype = AF_INET6;
+    } else {
+        fatal("Invalid protocol type");
+    }
+    
     struct addrinfo hints;
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_family = AF_INET; // IPv4
@@ -298,8 +310,8 @@ string get_busy_sides(struct pollfd poll_descriptors[5]) {
 }
 
 string validate_trick(int lewa, char* answer, ssize_t len) {
-    
-    string valid_prefix = "TRICK" + to_string(lewa);
+    if (len) len = len;
+    string valid_prefix = "TRICK" + to_string(lewa + 1);
     string msg(answer);
     if (msg.compare(0, valid_prefix.size(), valid_prefix) != 0) {
         cout << "wrong prefix\n";
@@ -312,18 +324,46 @@ string validate_trick(int lewa, char* answer, ssize_t len) {
     set<char> correct_2nd = {'0', '1', '2', '3'};
 
     string card;
+    if (msg[2] == '\r' and msg[3] == '\n' and msg.size() == 5) {
+        msg.pop_back();
+    }
 
     if (msg.size() == 4) {
         if (!correct_vals.contains(msg[0]) or !correct_colors.contains(msg[1]) or msg[2] != '\r' or msg[3] != '\n') {
-            cout << "wrong suffix\n";
+            cout << "wrong suffix, 4\n";
             return "X";
         }
         card = msg.substr(0,2);
     } else if (msg.size() == 5) {
-        if (msg[0] != '1' or !correct_2nd.contains(msg[1] or !correct_colors.contains(msg[2]) or msg[3] != '\r' or msg[4] != '\n')) {
-            cout << "wrong suffix\n";
+        // if (msg[0] != '1' or !correct_2nd.contains(msg[1]) or !correct_colors.contains(msg[2]) or msg[3] != '\r' or msg[4] != '\n') {
+        //     cout << "wrong suffix, 5\n";
+        //     return "X";
+        // }
+        
+
+        if (msg[0] != '1') {
+            cout << "Condition failed: msg[0] != '1'\n";
             return "X";
         }
+        if (!correct_2nd.contains(msg[1])) {
+            cout << "Condition failed: !correct_2nd.contains(msg[1])\n";
+            return "X";
+        }
+        if (!correct_colors.contains(msg[2])) {
+            cout << "Condition failed: !correct_colors.contains(msg[2])\n";
+            return "X";
+        }
+        if (msg[3] != '\r') {
+            cout << "Condition failed: msg[3] != '\\r'\n";
+            return "X";
+        }
+        if (msg[4] != '\n') {
+            cout << "Condition failed: msg[4] != '\\n'\n";
+            return "X";
+        }
+
+
+
         card = msg.substr(0,3);
     } else {
         cout << "something else wrong\n";
@@ -331,4 +371,192 @@ string validate_trick(int lewa, char* answer, ssize_t len) {
     }
 
     return card;
+}
+
+
+void send_wrong(int fd_from, int fd, int lewa) {
+    string wrong_msg = "WRONG" + std::to_string(lewa + 1) + "\r\n";
+    writen(fd, wrong_msg.c_str(), wrong_msg.size());
+    //cout << "sent wrong\n";
+    send_raport_msg(fd_from, fd_from, fd, wrong_msg);
+    //check for errors?
+}
+
+int card_to_int(const string& card) {
+    if (card[0] == '1') {
+        return 10;
+    }
+
+    char val = card[0];
+
+    switch (val) {
+        case '2':
+            return 2;
+        case '3':
+            return 3;
+        case '4':
+            return 4;
+        case '5':
+            return 5;
+        case '6':
+            return 6;
+        case '7':
+            return 7;
+        case '8':
+            return 8;
+        case '9':
+            return 9;
+        case 'J':
+            return 11;
+        case 'Q':
+            return 12;
+        case 'K':
+            return 13;
+        case 'A':
+            return 14;
+    }
+
+    return 0;
+}
+
+void send_raport_msg(int server_fd, int fd_from, int fd_to, const string& msg) {
+    struct sockaddr_in from_addr, to_addr;
+    socklen_t from_len = sizeof(from_addr), to_len = sizeof(to_addr);
+    if (server_fd == fd_from) {
+    
+        if (getsockname(fd_from, (struct sockaddr*)&from_addr, &from_len) < 0) {
+            error("getsockname");
+        } 
+        if (getpeername(fd_to, (struct sockaddr*)&to_addr, &to_len) < 0) {
+            error("getpeername");
+        }
+    } else {
+        if (getpeername(fd_from, (struct sockaddr*)&from_addr, &from_len) < 0) {
+            error("getpeername");
+        } 
+        if (getsockname(fd_to, (struct sockaddr*)&to_addr, &to_len) < 0) {
+            error("getsockname");
+        }
+    }
+
+    char const *from_ip = inet_ntoa(from_addr.sin_addr);
+    uint16_t from_port = ntohs(from_addr.sin_port);
+
+    char const *to_ip = inet_ntoa(to_addr.sin_addr);
+    uint16_t to_port = ntohs(to_addr.sin_port);
+
+    std::time_t t = std::time(nullptr);
+    std::tm* now = std::localtime(&t);
+
+    string raport_msg = string("[") + from_ip + ":" + to_string(from_port) 
+                            + ", " + to_ip + ":" + to_string(to_port) 
+                            + ", ";
+    
+    cout << raport_msg << std::put_time(now, "%Y-%m-%dT%H:%M:%S.000") << "] " << msg;
+}
+
+
+
+vector<string> parse_cards_templ(const string& input) {            
+    vector<string> cards;
+    for (unsigned long i = 0; i < input.size(); i++) {
+        string card;
+        if (input[i] == '1' ) {
+            card = input.substr(i, 3);
+            i += 2;
+        } else {
+            card = input.substr(i, 2);
+            i++;
+        }
+        cards.push_back(card);
+    }
+
+    return cards;
+}
+
+
+void send_iam(int socket_fd, char place) {
+    char msg[6];
+    msg[0] = 'I';
+    msg[1] = 'A';
+    msg[2] = 'M';
+    msg[3] = place;
+    msg[4] = '\r';
+    msg[5] = '\n';
+
+    ssize_t write_len = write(socket_fd, &msg, 6);
+    if (write_len < 0) {
+        syserr("write");
+    }
+}
+
+std::pair<int, std::vector<string>> parse_trick(const std::string& str) {
+    std::vector<string> cards;
+    int i = str.size() - 1;
+
+    // Parse cards from the end of the string
+    while (i > 6) { // 5 is the length of "TRICK" plus one digit
+        string card(1, str[i]); // assign suit before decrementing i
+        i--;
+        if (str[i] == '0') { // Handle 10
+            card = str.substr(i - 1, 2) + card;
+            i -= 2;
+        } else {
+            card = string(1, str[i]) + card;
+            i--;
+        }
+        cards.push_back(card);
+    }
+    
+
+    vector<string> cards_rev;
+
+    for (int i = cards.size() - 1; i >= 0; i--) {
+        cards_rev.push_back(cards[i]);
+    }
+
+    // Parse the number
+    int num = std::stoi(str.substr(5, i - 4));
+    return {num, cards_rev};
+}
+
+string format_cards(const vector<string>& cards) {
+    string msg;
+
+    for (int i = 0; i < cards.size(); i++) {
+        msg += cards[i] + ", ";
+    }
+    if (msg.size() > 2) {
+        msg.pop_back();
+        msg.pop_back();
+    }
+
+    return msg;
+}
+
+
+void parse_score(const string& str) {
+    size_t i = 5; // start after "SCORE"
+    string message = "The ";
+    message += (str.substr(0, 5) == "TOTAL" ? "total " : "");
+    message += "scores are:\n";
+    cout << message;
+    while (i < str.size()) {
+        char c = str[i++];
+        string num;
+        while (i < str.size() && std::isdigit(str[i])) {
+            num += str[i++];
+        }
+        cout << string(1, c) << " | " << num << endl;
+    }
+}
+
+
+void send_message(int socket_fd, const string& message) {
+    char message_c[message.size()];
+    strncpy(message_c, message.c_str(), message.size());
+    ssize_t write_len = write(socket_fd, &message_c, message.size());
+    if (write_len < 0 ) {
+        syserr("write");
+    }
 }

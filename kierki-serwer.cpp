@@ -8,6 +8,8 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <endian.h>
+
 #include <map>
 #include <array>
 #include <string.h>
@@ -35,11 +37,11 @@ class Player {
     public:
         char side;
         int socket_fd;
-        vector<array<string,13>> cards;
+        vector<vector<string>> cards;
         vector<string> deal_cards;
         int temp_points;
         int total_points;
-
+        
         Player(char side) {
             this->side = side;
             temp_points = 0;
@@ -67,7 +69,7 @@ class Player {
         }
 
         void remove_card(const string& card, int rozdanie) {   
-            for (int i = 0; i < 12; i++) {
+            for (int i = 0; i < 13; i++) {
                 if (cards[rozdanie][i] == card) {
                     cards[rozdanie][i] = "empty";
                     break;
@@ -75,24 +77,8 @@ class Player {
             }
         }
 
-        void parse_cards(const string& input) {
-            //Tutaj nie do końca musi być 2, bo może być 10, a wtedy będzie np 27.
-            //Trzeba to poprawić.
-            
-            array<string,13> cards;
-            int card_number = 0;
-            for (int i = 0; i < input.size(); i++) {
-                string card;
-                if (input[i] == '1' ) {
-                    card = input.substr(i, 3);
-                    i += 2;
-                } else {
-                    card = input.substr(i, 2);
-                    i++;
-                }
-                cards[card_number] = card;
-                card_number++;
-            }
+        void parse_cards(const string& input) {            
+            vector<string> cards = parse_cards_templ(input);
             this->cards.push_back(cards);
             this->deal_cards.push_back(input);
         }
@@ -138,6 +124,7 @@ class Server {
                     players[int_to_char(i%5)].parse_cards(input);
                 }
                 i++;
+                
             }
         };
 
@@ -152,6 +139,11 @@ class Server {
             server_address.sin_addr.s_addr = htonl(INADDR_ANY); // Listening on all interfaces.
             server_address.sin_port = htons(port);
 
+            int yes = 1;
+            if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0) {
+                syserr("setsockopt");
+            }
+
             //bind
             if (bind(socket_fd, (struct sockaddr *) &server_address, (socklen_t) sizeof server_address) < 0) {
                 syserr("bind");
@@ -164,41 +156,157 @@ class Server {
             cout << "socket\nbind\nlisten\n";
         }
 
-        void send_taken(int lewa, const string& current_lewa_history, char winner) {
-            string taken_msg = "TAKEN" + to_string(lewa) + current_lewa_history + winner +"\r\n";
-            taken_lewa_history.push_back(taken_msg);
-            cout << "sending TAKEN to every player\n";
+
+        void tcp_multicast(const string& message, struct pollfd poll_descriptors[CLIENTS]) {
+            char message_buf[message.size()];
+            strncpy(message_buf, message.c_str(), message.size());
+            
+            for (int i = 1; i < CLIENTS; i++) {
+                ssize_t write_len = write(poll_descriptors[i].fd, &message_buf, message.size());
+                if (write_len < 0) {
+                    syserr("write");
+                }
+                send_raport_msg(socket_fd, socket_fd, poll_descriptors[i].fd, message);
+                //check for errors?
+            }
         }
 
-        void adjust_temp_points(char player, string& current_lewa_history, int rozdanie) {
+        void send_taken(int lewa, const string& current_lewa_history, char winner, struct pollfd poll_descriptors[CLIENTS]) {
+            string taken_msg = "TAKEN" + to_string(lewa) + current_lewa_history + winner +"\r\n";
+            taken_lewa_history.push_back(taken_msg);
             
-            cout << "adjusting temporary points\n";
-            current_lewa_history = "";
+            tcp_multicast(taken_msg, poll_descriptors);
+
+            //cout << "sending TAKEN to every player\n";
+        }
+
+        void adjust_temp_points(char player, string& current_lewa_history, int rozdanie, int lewa) {
+            
+            int points = 0;
+            int deal_type = deal_ids[rozdanie];
+
+            array<string, 4> lewa_cards;
+            int card_id = 0;
+            for (unsigned long i = 0; i < current_lewa_history.size(); i++) {
+                if (current_lewa_history[i] == '1' ) {
+                    lewa_cards[card_id] = current_lewa_history.substr(i, 3);
+                    i += 2;
+                } else {
+                    lewa_cards[card_id] = current_lewa_history.substr(i, 2);
+                    i++;
+                }
+                card_id++;
+            }
+
+            switch (deal_type) {
+                case 1:
+                    points++;
+                    break;
+                case 2:
+                    //Adjust points for deal 2
+                    for (string card : lewa_cards) {
+                        if (card.back() == 'H') {
+                            points++;
+                        }
+                    }
+                    break;
+                case 3:
+                    for (string card : lewa_cards) {
+                        if (card[0] == 'Q') {
+                            points += 5;
+                        }
+                    }
+                    break;
+                case 4:
+                    //Adjust points for deal 4
+                    for (string card : lewa_cards) {
+                        if (card[0] == 'K' or card[0] == 'J') {
+                            points += 2;
+                        }
+                    }
+                    break;
+                case 5:
+                    for (string card : lewa_cards) {
+                        if (card[0] == 'K' and card[1] == 'H') {
+                            points += 18;
+                        }
+                    }
+                    break;
+                case 6:
+                    if (lewa == 6 or lewa == 12) {
+                        points += 10;
+                    }
+                    break;
+                case 7:
+                    //Adjust points for deal 7
+                    points++;
+                    for (string card : lewa_cards) {
+                        if (card.back() == 'H') {
+                            points++;
+                        }
+                        if (card[0] == 'Q') {
+                            points += 5;
+                        }
+                        if (card[0] == 'Q') {
+                            points += 5;
+                        }
+                        if (card[0] == 'K' or card[0] == 'J') {
+                            points += 2;
+                        }
+                        if (card[0] == 'K' and card[1] == 'H') {
+                            points += 18;
+                        }
+                    }
+                    if (lewa == 6 or lewa == 12) {
+                        points += 10;
+                    }
+                    break;
+            }
+
+            players[player].temp_points += points;
+            current_lewa_history.clear();
 
         }
 
         void adjust_total_points() {
             //Add temp points to total points
+
+            char player_sides[4] = {'N', 'E', 'S', 'W'};
+
+            for (auto side : player_sides) {
+                players[side].total_points += players[side].temp_points;
+            }
+
             cout << "adjusting total points\n";
         }
 
-        void send_score_and_total() {
+        void send_score_and_total(struct pollfd poll_descriptors[CLIENTS]) {
             
-            //send SCORE - temp points 
-            //send TOTAL - total points
-            //set to 0 all temp points
+            string score_msg = "SCORE";
 
+            for (auto player = players.begin(); player != players.end(); ++player) {
+                score_msg += player->second.side + to_string(player->second.temp_points);
+            }
+            score_msg += "\r\n";
+
+            tcp_multicast(score_msg, poll_descriptors);
+
+            string total_msg = "TOTAL";
+            for (auto player = players.begin(); player != players.end(); ++player) {
+                total_msg += player->second.side + to_string(player->second.total_points);
+            }
+            total_msg += "\r\n";
+
+            tcp_multicast(total_msg, poll_descriptors);
+
+            for (std::pair<char,Player> player : players) {
+                player.second.temp_points = 0;
+            }
+            
             cout << "sending score and total\n";
         }
 
 };
-
-void send_wrong(int fd, int lewa) {
-    string wrong_msg = "WRONG" + std::to_string(lewa + 1) + "\r\n";
-    writen(fd, wrong_msg.c_str(), wrong_msg.size());
-    cout << "sent wrong\n";
-    //check for errors?
-}
 
 
 int main(int argc, char* argv[]) {
@@ -213,6 +321,7 @@ int main(int argc, char* argv[]) {
 
     Server server;
     server.handle_file_input(file);
+
     server.start(port);
     int socket_fd = server.socket_fd;
 
@@ -241,9 +350,10 @@ int main(int argc, char* argv[]) {
     char who_has_turn;
     char lewa_color;
     int lewa_round = 0;
+    char lewa_winner;
+    int lewa_highest_card = 0;
     struct sockaddr_in client_address;
     socklen_t client_address_len = sizeof client_address;
-
 
     do {
         if (!is_game_on) {
@@ -260,13 +370,12 @@ int main(int argc, char* argv[]) {
             poll_descriptors[0].fd = -1;
         }
 
-        int poll_status = poll(poll_descriptors, CLIENTS, 1000);
+        int poll_status = poll(poll_descriptors, CLIENTS, 50);
 
         if (poll_status == -1 ) {
             if (errno == EINTR) {
                 printf("interrupted system call\n");
                 close(socket_fd);
-                //exit(1);
             }
             else {
                 syserr("poll");
@@ -281,31 +390,42 @@ int main(int argc, char* argv[]) {
                                        &client_address_len);
                 set_timeout(client_fd, time);
                 bool wrong_client = false;
-                cout << "accepted connection from a new client\n";
+                //cout << "accepted connection from a new client\n";
                 if (client_fd < 0) {
                     syserr("accept");
                 }
 
                 char buffer[6];
 
-                //readn what the client has to say
-                ssize_t read_len = readn(client_fd, &buffer, 6);
+                //read what the client has to say
+                ssize_t read_len = read(client_fd, &buffer, 6);
                 if (read_len < 0) {
                     if (errno == EAGAIN) {
-                        close(client_fd);
                         error("timeout");
+                        ssize_t write_len = write(client_fd, &read_len,0 );
+                        if (write_len < 0) {
+                            error("write");
+                        }
+                        close(client_fd);
+
                         continue;
                     } else {                    
-                        syserr("readn");
+                        error("read");
                     }
                 }
-                cout << buffer << endl;
+                
+                string msg(buffer);
+                send_raport_msg(socket_fd, client_fd, socket_fd, msg);
 
                 char side = buffer[3];
                 buffer[3] = 'X';
                 
                 if (strncmp(buffer, "IAMX\r\n", 6) != 0) {
                     error("wrong IAM message, %s", buffer);
+                    ssize_t write_len = write(client_fd, &side, 0 );
+                    if (write_len < 0) {
+                        error("write");
+                    }
                     close(client_fd);
                     wrong_client = true;
                 }
@@ -313,9 +433,10 @@ int main(int argc, char* argv[]) {
 
                 if (poll_descriptors[char_to_int(side)].fd != -1) {
                     string message = "BUSY" + get_busy_sides(poll_descriptors) + "\r\n";
-                    writen(client_fd, message.c_str(), message.size());
+                    send_message(client_fd, message);
+                    send_raport_msg(socket_fd, socket_fd, client_fd, message);
                     close(client_fd);
-                    cout << "sent " << message << endl;
+                    //cout << "sent " << message << endl;
                     wrong_client = true;
                 }
 
@@ -324,7 +445,7 @@ int main(int argc, char* argv[]) {
                     poll_descriptors[char_to_int(side)].events = POLLIN;
                     last_joined = side;
                     active_clients++;
-                    cout << "new client accepted\n";
+                    //cout << "new client accepted\n";
                 }
                 
                 if (!wrong_client and active_clients == 4) {
@@ -339,14 +460,14 @@ int main(int argc, char* argv[]) {
                                           + server.players[last_joined].deal_cards[rozdanie] 
                                           + "\r\n";
                 
-                        writen(poll_descriptors[char_to_int(last_joined)].fd, deal_msg.c_str(), deal_msg.size());
-                        //check for errors?
-                        cout << "sent " << deal_msg << endl;
+                        send_message(client_fd, deal_msg);
+                        //cout << "sent " << deal_msg << endl;
+                        send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, deal_msg);
 
                         //send also every TAKEN history
-                        for (string taken_lewa_msg : server.taken_lewa_history) {
-                            writen(poll_descriptors[char_to_int(last_joined)].fd, taken_lewa_msg.c_str(), taken_lewa_msg.size());
-                            //check for errors?
+                        for (string& taken_lewa_msg : server.taken_lewa_history) {
+                            send_message(client_fd, taken_lewa_msg);
+                            send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, taken_lewa_msg);
                         }
                     }
                     
@@ -361,33 +482,31 @@ int main(int argc, char* argv[]) {
                 string deal_msg_blueprint = "DEAL" + std::to_string(server.deal_ids[rozdanie]) + server.who_starts[rozdanie];
                 for (int i = 1; i <= 4; i++) {
                     string deal_msg = deal_msg_blueprint + server.players[int_to_char(i)].deal_cards[rozdanie] + "\r\n";
-                    writen(poll_descriptors[i].fd, deal_msg.c_str(), deal_msg.size());
-                    cout << "sent " << deal_msg << endl;
+                    send_message(poll_descriptors[i].fd, deal_msg);
+                    send_raport_msg(socket_fd, socket_fd, poll_descriptors[i].fd, deal_msg);
+                    //cout << "sent " << deal_msg << endl;
                     //check for errors?
                 }
                 sent_deals = true;
-                cout << "sent deals\n";
+                //cout << "sent deals\n";
             }
 
-            cout << "who has turn: " << who_has_turn << endl;
+            //cout << "who has turn: " << who_has_turn << endl;
             bool player_serviced = false;
 
             for (int i = 1; i < CLIENTS; i++) {
                 char temp_buff[1];
                 if (poll_descriptors[i].fd != -1 and (poll_descriptors[i].revents & (POLLIN | POLLERR))) {
                     
-                    ssize_t read_len = readn(poll_descriptors[i].fd, &temp_buff, 1);
-                    if (read_len < 0) {
-                        error("??? Bro u had one job..");
-                        //disconnect?
-                    } else if (read_len == 0) {
+                    ssize_t read_len = read(poll_descriptors[i].fd, &temp_buff, 1);
+                    if (read_len <= 0) {
                         //somebody left
                         close(poll_descriptors[i].fd);
                         poll_descriptors[i].fd = -1;
                         active_clients--;
                         is_game_on = false;
                     } else {
-                        send_wrong(poll_descriptors[i].fd, lewa);
+                        send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
                     }
                 } else if (!player_serviced and who_has_turn == int_to_char(i)) {
                     if (!is_game_on) {
@@ -396,37 +515,29 @@ int main(int argc, char* argv[]) {
                     bool got_correct_answer = false;
                     char answer[12];
 
-                    string trick_msg = "TRICK" + to_string(lewa) + current_lewa_history;
+                    string trick_msg = "TRICK" + to_string(lewa + 1) + current_lewa_history + "\r\n";
                     string card;
                     do {
-                        writen(poll_descriptors[i].fd, trick_msg.c_str(), trick_msg.size());
-                        cout << "sent " << trick_msg << " to " << who_has_turn << endl;
+                        send_message(poll_descriptors[i].fd, trick_msg);
+                        send_raport_msg(socket_fd, socket_fd, poll_descriptors[i].fd, trick_msg);
 
-                        //Tutaj trzeba też ogarnąć to, że gracz może wyjść. Wtedy trzeba
-                        //zbreakować
-                        //Sending:
-                        //TRICK0\r\n 8 min
-                        //TRICK1310C10D10H10S\r\n 21 max
-
-                        //receiving
-                        //TRICK02S\r\n 10 min
-                        //TRICK1310S\r\n 12 max
-
-                        //Tutaj źle odczytuje. Trzeba zobaczyc w czym jest problem
-                        //Co DOKŁADNIE wysyła i co DOKŁADNIE odbiera i czemu się nie zgadza
-                        //W zeszycie jakiegoś quick fixa zrobić
-                        ssize_t read_len = readn(poll_descriptors[i].fd, &answer, 12);
-                        
-                        cout << read_len << endl;
-                        
+                        ssize_t read_len = read(poll_descriptors[i].fd, &answer, 12);
+                                                
                         if (read_len < 0) {
                             if (errno == EAGAIN) {
                                 error("timeout");
                                 continue;
                             } else {
-                                syserr("readn");
+                                error("read");
+                                close(poll_descriptors[i].fd);
+                                poll_descriptors[i].fd = -1;
+                                active_clients--;
+                                is_game_on = false;
+                                break;
                             }
                         } 
+
+                        send_raport_msg(socket_fd, poll_descriptors[i].fd, socket_fd, string(answer));
 
                         if (read_len == 0) {
                             //player has quit during his turn
@@ -438,10 +549,10 @@ int main(int argc, char* argv[]) {
                         }
 
                         card = validate_trick(lewa, answer, read_len);
-                        cout << "card: " << card << endl;
+
                         if (card.compare("X") == 0) {
                             error("wrong TRICK, %s", answer);
-                            send_wrong(poll_descriptors[i].fd, lewa);
+                            send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
                             continue;
                         }
 
@@ -449,7 +560,7 @@ int main(int argc, char* argv[]) {
                         //We have to check if the player has such card
                         if (!server.players[who_has_turn].has_card(card, rozdanie)) {
                             error("wrong TRICK - player does not have such card");
-                            send_wrong(poll_descriptors[i].fd, lewa);
+                            send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
                             continue;
                         }
 
@@ -458,7 +569,14 @@ int main(int argc, char* argv[]) {
                             lewa_color = card.back();
                         } else if (lewa_round > 0 and lewa_color != card.back() and server.players[who_has_turn].has_color(lewa_color, rozdanie)) {
                             error("wrong TRICK - player can't place card of this color");
-                            send_wrong(poll_descriptors[i].fd, lewa);
+                            for (auto card : server.players[who_has_turn].cards[rozdanie]) {
+                                if (card.compare("empty") != 0 ) {
+                                    cout << card << " ";
+                                }
+                            }
+                            cout << endl;
+
+                            send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
                             continue;
                         }
 
@@ -469,6 +587,19 @@ int main(int argc, char* argv[]) {
                     } while (!got_correct_answer);
 
                     if (is_game_on) {
+                        if (lewa_round == 0) {
+                            lewa_winner = who_has_turn;
+                            lewa_highest_card = card_to_int(card);
+                            
+                        } else if (lewa_color == card.back() and card_to_int(card) > lewa_highest_card) {
+                            
+                            lewa_winner = who_has_turn;
+                            lewa_highest_card = card_to_int(card);
+                        }
+                        
+                        cout << "highest card: " << lewa_highest_card << endl;
+                        cout << "lewa winner: " << lewa_winner << endl;
+
                         server.players[who_has_turn].remove_card(card,rozdanie);
                         current_lewa_history += card;
                         lewa_round++;
@@ -481,38 +612,33 @@ int main(int argc, char* argv[]) {
             if (is_game_on and lewa_round == 4) {
                 
                 lewa_round = 0;
-                //choose lewa winner -> assign who_starts
-                char winner = 'S';
-                who_has_turn = winner;
-                lewa++;
-                string taken_msg = "TAKEN" + to_string(lewa) + current_lewa_history + winner +"\r\n";
-                
-                
-                server.send_taken(lewa, current_lewa_history, winner);
-                
-                server.adjust_temp_points(winner, current_lewa_history, rozdanie); //Todo implement
+                who_has_turn = lewa_winner;
+                cout << "lewa winner: " << lewa_winner << endl;
+                lewa++;           
+                server.send_taken(lewa, current_lewa_history, lewa_winner, poll_descriptors);
+                server.adjust_temp_points(lewa_winner, current_lewa_history, rozdanie, lewa);
             }
 
             if (is_game_on and lewa == 13) {
                 lewa = 0;
                 rozdanie++;
                 sent_deals = false;
-                //adjust total points
                 server.adjust_total_points();
-                server.send_score_and_total();
-                //wyzerowac temp points
+                server.send_score_and_total(poll_descriptors);
             }
-            cout << "\nend of poll\n\n";
         }
 
-    } while(rozdanie < server.deal_count);
+    } while (rozdanie < server.deal_count);
 
-    for (int i = 0; i < CLIENTS; i++) {
+
+    for (int i = 1; i < CLIENTS; i++) {
         if (poll_descriptors[i].fd != -1) {
+            send_message(poll_descriptors[i].fd, "");
             close(poll_descriptors[i].fd);
         }
     }
 
+    close(socket_fd);
     return 0;
 
 }

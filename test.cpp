@@ -75,32 +75,38 @@ void print_cards(const std::vector<std::pair<std::string, std::string>>& cards) 
 }
 
 
-int main() {
-    
-    string input = "ASKC7SQD2C5S4DJC6C9DQC4SAD";
-    
-    array<string,13> cards = parse_cards(input);
-    
-    vector<std::pair<std::string, std::string>> cards_vector;
+struct Card {
+    std::string value;
+    char suit;
 
-    for (int i = 0; i < 13; i++) {
-        string card = cards[i];
-        string rank;
-        string suit;
+    void print() const {
+        std::cout << value << suit << " ";
+    }
+};
 
-        if (card.size() == 3) {
-            rank = card.substr(0, 2);
-            suit = card.substr(2, 1);
-        } else {
-            rank = card.substr(0, 1);
-            suit = card.substr(1, 1);
+vector<std::pair<char, int>> parseScore(const string& str) {
+    vector<std::pair<char, int>> scores;
+    size_t i = 5; // start after "SCORE"
+
+    while (i < str.size()) {
+        char c = str[i++];
+        string num;
+        while (i < str.size() && std::isdigit(str[i])) {
+            num += str[i++];
         }
-        cards_vector.push_back(std::make_pair(rank, suit));
+        scores.push_back({c, stoi(num)});
     }
 
-    print_cards(cards_vector);
-    // for (int i = 0; i < 13; i++) {
-    //     std::cout << cards_vector[i].first << cards_vector[i].second  << std::endl;
-    // }
+    return scores;
+}
 
+int main() {
+    
+    string input = "SCOREN21E12093S23W0";
+
+    vector<std::pair<char, int>> scores = parseScore(input);
+    
+    for (const auto& score : scores) {
+        cout << score.first << " " << score.second << endl;
+    }
 }
