@@ -277,7 +277,7 @@ class Server {
                 players[side].total_points += players[side].temp_points;
             }
 
-            cout << "adjusting total points\n";
+            //cout << "adjusting total points\n";
         }
 
         void send_score_and_total(struct pollfd poll_descriptors[CLIENTS]) {
@@ -303,7 +303,7 @@ class Server {
                 player.second.temp_points = 0;
             }
             
-            cout << "sending score and total\n";
+            //cout << "sending score and total\n";
         }
 
 };
@@ -357,7 +357,7 @@ int main(int argc, char* argv[]) {
 
     do {
         if (!is_game_on) {
-            cout << "waiting for players\n";
+            //cout << "waiting for players\n";
         }
         
         for (int i = 0; i < CLIENTS; ++i) {
@@ -493,6 +493,7 @@ int main(int argc, char* argv[]) {
 
             //cout << "who has turn: " << who_has_turn << endl;
             bool player_serviced = false;
+            bool got_correct_answer = true;
 
             for (int i = 1; i < CLIENTS; i++) {
                 char temp_buff[1];
@@ -508,16 +509,15 @@ int main(int argc, char* argv[]) {
                     } else {
                         send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
                     }
-                } else if (!player_serviced and who_has_turn == int_to_char(i)) {
+                } else if (!player_serviced and who_has_turn == int_to_char(i) and lewa_round < 4) {
                     if (!is_game_on) {
                         continue;
                     }
-                    bool got_correct_answer = false;
                     char answer[12];
 
                     string trick_msg = "TRICK" + to_string(lewa + 1) + current_lewa_history + "\r\n";
                     string card;
-                    do {
+
                         send_message(poll_descriptors[i].fd, trick_msg);
                         send_raport_msg(socket_fd, socket_fd, poll_descriptors[i].fd, trick_msg);
 
@@ -545,7 +545,8 @@ int main(int argc, char* argv[]) {
                             poll_descriptors[i].fd = -1;
                             active_clients--;
                             is_game_on = false;
-                            break;
+                            got_correct_answer = false;
+                            continue;
                         }
 
                         card = validate_trick(lewa, answer, read_len);
@@ -553,7 +554,7 @@ int main(int argc, char* argv[]) {
                         if (card.compare("X") == 0) {
                             error("wrong TRICK, %s", answer);
                             send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
-                            continue;
+                            got_correct_answer = false;
                         }
 
                         //Now we know that the card is valid.
@@ -561,10 +562,12 @@ int main(int argc, char* argv[]) {
                         if (!server.players[who_has_turn].has_card(card, rozdanie)) {
                             error("wrong TRICK - player does not have such card");
                             send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
-                            continue;
+                            got_correct_answer = false;
                         }
 
                         //And also if specified card can be placed
+                        cout << "player placed card of color: " << card.back() << endl;
+
                         if (lewa_round == 0) {
                             lewa_color = card.back();
                         } else if (lewa_round > 0 and lewa_color != card.back() and server.players[who_has_turn].has_color(lewa_color, rozdanie)) {
@@ -577,16 +580,14 @@ int main(int argc, char* argv[]) {
                             cout << endl;
 
                             send_wrong(socket_fd, poll_descriptors[i].fd, lewa);
-                            continue;
+                            got_correct_answer = false;
                         }
 
                         //Now we know that card can be placed - we can successfully complete card deployment procedure
-                        got_correct_answer = true;
-                        player_serviced = true;
+                        if (got_correct_answer) player_serviced = true;
 
-                    } while (!got_correct_answer);
 
-                    if (is_game_on) {
+                    if (is_game_on and got_correct_answer) {
                         if (lewa_round == 0) {
                             lewa_winner = who_has_turn;
                             lewa_highest_card = card_to_int(card);
@@ -607,9 +608,9 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
-
+            //cout << (is_game_on ? "game on " : "game off ")  << (got_correct_answer ? "got answer " : "didnt get correct answer ") <<"lewa round: " << lewa_round << endl;
             //Post-service logic
-            if (is_game_on and lewa_round == 4) {
+            if (is_game_on and got_correct_answer and lewa_round == 4) {
                 
                 lewa_round = 0;
                 who_has_turn = lewa_winner;
@@ -619,12 +620,13 @@ int main(int argc, char* argv[]) {
                 server.adjust_temp_points(lewa_winner, current_lewa_history, rozdanie, lewa);
             }
 
-            if (is_game_on and lewa == 13) {
+            if (is_game_on and got_correct_answer and lewa == 13) {
                 lewa = 0;
                 rozdanie++;
                 sent_deals = false;
                 server.adjust_total_points();
                 server.send_score_and_total(poll_descriptors);
+                server.taken_lewa_history.clear();
             }
         }
 

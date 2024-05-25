@@ -1,5 +1,5 @@
 CC = g++
-CXXFLAGS = -Wall -Wextra -std=c++20
+CXXFLAGS = -Wall -Wextra -std=c++23
 LFLAGS = 
 
 
@@ -19,7 +19,6 @@ kierki-klient.o: kierki-klient.cpp
 	g++ $(CXXFLAGS) -c -O2 kierki-klient.cpp
 kierki-serwer.o: kierki-serwer.cpp
 	g++ $(CXXFLAGS) -c -O2 kierki-serwer.cpp
-
 
 
 clean:

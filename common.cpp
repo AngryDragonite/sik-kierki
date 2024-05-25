@@ -258,7 +258,7 @@ int char_to_int(char c) {
 void get_input(int argc, char *argv[], uint16_t &port, string &file, unsigned &time) {
     int c;
     string time_str;
-    while ((c = getopt(argc, argv, "p:tf:")) != -1) {
+    while ((c = getopt(argc, argv, "p:t:f:")) != -1) {
         switch (c) {
             case 'f':
                 file = optarg;
@@ -267,7 +267,7 @@ void get_input(int argc, char *argv[], uint16_t &port, string &file, unsigned &t
                 port = read_port(optarg);
                 break;
             case 't':
-                time_str =  atoi(optarg);
+                time_str =  optarg;
                 break;
         }
     }
@@ -280,6 +280,9 @@ void get_input(int argc, char *argv[], uint16_t &port, string &file, unsigned &t
     }
     if (time_str.empty()) {
         time = 5;
+    } else {
+        time = stoi(time_str);
+    
     }
 }
 

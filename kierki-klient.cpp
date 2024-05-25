@@ -11,6 +11,7 @@
 #include <tuple>
 #include <ctime>
 #include <iomanip>
+#include <algorithm>
 
 
 #include "common.h"
@@ -21,6 +22,7 @@ using std::endl;
 using std::cin;
 using std::pair;
 using std::to_string;
+using std::find;
 
 void get_input(int argc, char* argv[], struct sockaddr_in& server_address, bool &ipv4, bool &ipv6, char &place, bool &automatic) {
     int c;
@@ -174,8 +176,8 @@ int main(int argc, char* argv[]) {
                 send_raport_msg(server_address, self_address, kbuff);
                 kbuff.pop_back();
                 kbuff.pop_back();
-                if (count > 20) automatic = false;
-                count++;
+                // if (count > 20) automatic = false;
+                // count++;
                 if (kbuff.find("BUSY") == 0) {
                     if (!automatic) {
                         string message = "Place busy, list of busy places received: ";
@@ -287,31 +289,26 @@ int main(int argc, char* argv[]) {
                         cards.emplace_back(last_card);
                         last_card.clear();
                     }
-                    automatic = false;
+                    //automatic = false;
                 } else if (kbuff.find("TAKEN") == 0) {
                     //TAKEN<numer lewy><lista kart><miejsce przy stole klienta biorącego lewę>
                     //A trick <numer lewy> is taken by <miejsce przy stole klienta biorącego lewę>, cards <lista kart>.
-                    cout << kbuff << endl;
-                    
+                    string winner = kbuff.substr(kbuff.size()-1,1);
+                    kbuff.pop_back();
+
+                    std::pair<int, vector<string>> parsed_info = parse_trick(kbuff);
+
                     if (!automatic) {
                         int lewa_c;
-                        string winner = kbuff.substr(kbuff.size()-1,1);
-                        kbuff.pop_back();
-
-                        std::pair<int, vector<string>> parsed_info = parse_trick(kbuff);
                         lewa_c = parsed_info.first;
                         current_lewa_cards = parsed_info.second;
                         lewa++;
+                        
 
-
-                        string message = "A trick " + std::to_string(lewa_c) + " is taken by " + winner + ", cards " + format_cards(current_lewa_cards) + ".\n";
+                        string message = "A trick " + std::to_string(lewa_c) + " is taken by " + winner + ", cards " + format_cards(current_lewa_cards) + ".\n"; // Wrong lewa_c
                         cout << message;
                     } else {
                         int lewa_c;
-                        string winner = kbuff.substr(kbuff.size()-1,1);
-                        kbuff.pop_back();
-
-                        std::pair<int, vector<string>> parsed_info = parse_trick(kbuff);
                         lewa_c = parsed_info.first;
                         current_lewa_cards = parsed_info.second;
                         lewa++;
@@ -321,6 +318,15 @@ int main(int argc, char* argv[]) {
                         cout << message;
                         taken_lewa_history.push_back(message);
                     }
+
+                    //if a card is in current_lewa_cards, remove it from cards
+                    for (int i = 0; i < current_lewa_cards.size(); i++) {
+                        if (find(cards.begin(), cards.end(), current_lewa_cards[i]) != cards.end()) {
+                            cards.erase(find(cards.begin(), cards.end(), current_lewa_cards[i]));
+                            cout << "card " << current_lewa_cards[i] << " found in current cards\n";
+                        } 
+                    }
+
                     
                     
                 } else if (kbuff.find("SCORE") == 0 or kbuff.find("TOTAL") == 0) {

@@ -29,7 +29,7 @@ def generate_cards():
 
 f = open("cards.txt", "w")
 
-for i in range(0,10):
+for i in range(0,100):
     f.write(generate_cards())
 
 f.close()
