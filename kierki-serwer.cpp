@@ -448,31 +448,63 @@ int main(int argc, char* argv[]) {
                     //cout << "new client accepted\n";
                 }
                 
-                if (!wrong_client and active_clients == 4) {
-                    //Game hasnt started yet
-                    if (!game_started) {
-                        game_started = true;
-                    } else {
-                        //player joined in the middle of the game, after somebody left                        
-                        string deal_msg = "DEAL"
-                                          + to_string(server.deal_ids[rozdanie])
-                                          + server.who_starts[rozdanie] 
-                                          + server.players[last_joined].deal_cards[rozdanie] 
-                                          + "\r\n";
-                
-                        send_message(client_fd, deal_msg);
-                        //cout << "sent " << deal_msg << endl;
-                        send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, deal_msg);
 
-                        //send also every TAKEN history
-                        for (string& taken_lewa_msg : server.taken_lewa_history) {
-                            send_message(client_fd, taken_lewa_msg);
-                            send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, taken_lewa_msg);
-                        }
-                    }
-                    
+                //wrong_client, active_clients, game_started, is_game_on
+                //Co ja chce tu zrobić?
+                //Chce żeby nie wysyłało dealów i takenow jeśli game_started jest false
+                //Chce zeby wysyłało deale i takeny jesli mamy <=4 graczy i game_started jest true
+                //Chce zeby ustawiało is_game_on na true jeśli mamy 4 graczy
+                if (!wrong_client and !game_started and active_clients == 4) {
+                    game_started = true;
                     is_game_on = true;
-                }            
+                } else if (!wrong_client and game_started and active_clients <=4) {
+                    //player joined in the middle of the game, after somebody left                        
+                    string deal_msg = "DEAL"
+                                        + to_string(server.deal_ids[rozdanie])
+                                        + server.who_starts[rozdanie] 
+                                        + server.players[last_joined].deal_cards[rozdanie] 
+                                        + "\r\n";
+            
+                    send_message(client_fd, deal_msg);
+                    //cout << "sent " << deal_msg << endl;
+                    send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, deal_msg);
+
+                    //send also every TAKEN history
+                    for (string& taken_lewa_msg : server.taken_lewa_history) {
+                        send_message(client_fd, taken_lewa_msg);
+                        send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, taken_lewa_msg);
+                    }
+                    if (active_clients == 4) { is_game_on = true; }
+                }
+
+
+
+
+                // if (!wrong_client and active_clients == 4) {
+                //     //Game hasnt started yet
+                //     if (!game_started ) {
+                //         game_started = true;
+                //     } else {
+                //         //player joined in the middle of the game, after somebody left                        
+                //         string deal_msg = "DEAL"
+                //                           + to_string(server.deal_ids[rozdanie])
+                //                           + server.who_starts[rozdanie] 
+                //                           + server.players[last_joined].deal_cards[rozdanie] 
+                //                           + "\r\n";
+                
+                //         send_message(client_fd, deal_msg);
+                //         //cout << "sent " << deal_msg << endl;
+                //         send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, deal_msg);
+
+                //         //send also every TAKEN history
+                //         for (string& taken_lewa_msg : server.taken_lewa_history) {
+                //             send_message(client_fd, taken_lewa_msg);
+                //             send_raport_msg(socket_fd, socket_fd, poll_descriptors[char_to_int(last_joined)].fd, taken_lewa_msg);
+                //         }
+                //     }
+                    
+                //     is_game_on = true;
+                // }            
             } 
 
             //Handle connection requests
